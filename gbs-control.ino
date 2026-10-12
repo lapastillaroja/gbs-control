@@ -8,6 +8,7 @@
 #include "ntsc_1280x1024.h"
 #include "ntsc_1920x1080.h"
 #include "ntsc_downscale.h"
+#include "ntsc_384p.h"
 #include "pal_1280x720.h"
 #include "pal_1280x1024.h"
 #include "pal_1920x1080.h"
@@ -359,6 +360,7 @@ void externalClockGenResetClock()
 
 void externalClockGenSyncInOutRate()
 {
+    if (uopt->presetPreference == Output384P) return;
     fsDebugPrintf("externalClockGenSyncInOutRate()\n");
 
     if (!rto->extClockGenDetected) {
@@ -725,6 +727,7 @@ void writeProgramArrayNew(const uint8_t *programArray, boolean skipMDSection)
 
 void activeFrameTimeLockInitialSteps()
 {
+    if (uopt->presetPreference == Output384P) return;
     // skip if using external clock gen
     if (rto->extClockGenDetected) {
         SerialM.println(F("Active FrameTime Lock enabled, adjusting external clock gen frequency"));
@@ -2715,6 +2718,7 @@ void fastGetBestHtotal()
 
 boolean runAutoBestHTotal()
 {
+    if (uopt->presetPreference == Output384P) return false;
     if (!FrameSync::ready() && rto->autoBestHtotalEnabled == true && rto->videoStandardInput > 0 && rto->videoStandardInput < 15) {
 
         //Serial.println("running");
@@ -3364,7 +3368,7 @@ void doPostPresetLoadSteps()
     rto->sourceDisconnected = false; // this must be true if we reached here (no syncwatcher operation)
     rto->boardHasPower = true;       //same
 
-    if (rto->presetID == 0x06 || rto->presetID == 0x16) {
+    if (rto->presetID == 0x06 || rto->presetID == 0x16 || rto->presetID == 0x07) {
         rto->isCustomPreset = 0; // override so it applies section 2 deinterlacer settings
     }
 
@@ -3452,7 +3456,7 @@ void doPostPresetLoadSteps()
             }
 
             // downscale preset: source is SD
-            if (rto->presetID == 0x06 || rto->presetID == 0x16) {
+            if (rto->presetID == 0x06 || rto->presetID == 0x16 || rto->presetID == 0x07) {
                 setCsVsStart(2);                        // or 3, 0
                 setCsVsStop(0);                         // fixes field position
                 GBS::IF_VS_SEL::write(1);               // 1_00 5 // turn off VHS sync feature
@@ -3486,7 +3490,7 @@ void doPostPresetLoadSteps()
             GBS::ADC_FLTR::write(3); // 5_03 4/5
             GBS::PLLAD_KS::write(1); // 5_16
 
-            if (rto->presetID != 0x06 && rto->presetID != 0x16) {
+            if (rto->presetID != 0x06 && rto->presetID != 0x16 && rto->presetID != 0x07) {
                 setCsVsStart(14);        // pal // hm
                 setCsVsStop(11);         // probably setting these for modes 8,9
                 GBS::IF_HB_SP::write(0); // 1_12 deinterlace offset, fixes colors (downscale needs diff)
@@ -3513,7 +3517,7 @@ void doPostPresetLoadSteps()
             }
 
             // downscale preset: source is EDTV
-            if (rto->presetID == 0x06 || rto->presetID == 0x16) {
+            if (rto->presetID == 0x06 || rto->presetID == 0x16 || rto->presetID == 0x07) {
                 GBS::MADPT_Y_VSCALE_BYPS::write(0);     // 2_02 6
                 GBS::MADPT_UV_VSCALE_BYPS::write(0);    // 2_02 7
                 GBS::MADPT_PD_RAM_BYPS::write(0);       // 2_24 2 one line fifo for line phase adjust
@@ -3522,7 +3526,7 @@ void doPostPresetLoadSteps()
                 GBS::MADPT_SEL_PHASE_INI::write(0);     // 2_31 2 disable
             }
         }
-        if (rto->videoStandardInput == 3 && rto->presetID != 0x06) { // ED YUV 60
+        if (rto->videoStandardInput == 3 && rto->presetID != 0x06 && rto->presetID != 0x07) { // ED YUV 60
             setCsVsStart(16);                                        // ntsc
             setCsVsStop(13);                                         //
             GBS::IF_HB_ST::write(30);                                // 1_10; magic number
@@ -3612,7 +3616,7 @@ void doPostPresetLoadSteps()
         }
     }
 
-    if (rto->presetID == 0x06 || rto->presetID == 0x16) {
+    if (rto->presetID == 0x06 || rto->presetID == 0x16 || rto->presetID == 0x07) {
         rto->isCustomPreset = GBS::GBS_PRESET_CUSTOM::read(); // override back
     }
 
@@ -3885,7 +3889,7 @@ void doPostPresetLoadSteps()
 
     setAndUpdateSogLevel(rto->currentLevelSOG); // use this to cycle SP / ADPLL latches
 
-    if (rto->presetID != 0x06 && rto->presetID != 0x16) {
+    if (rto->presetID != 0x06 && rto->presetID != 0x16 && rto->presetID != 0x07) {
         // IF_VS_SEL = 1 for SD/HD SP mode in HD mode (5_3e 1)
         GBS::IF_VS_SEL::write(0); // 0 = "VCR" IF sync, requires VS_FLIP to be on, more stable?
         GBS::IF_VS_FLIP::write(1);
@@ -3894,6 +3898,12 @@ void doPostPresetLoadSteps()
     GBS::SP_CLP_SRC_SEL::write(0); // 0: 27Mhz clock; 1: pixel clock
     GBS::SP_CS_CLP_ST::write(32);
     GBS::SP_CS_CLP_SP::write(48); // same as reset parameters
+    if (rto->presetID == 0x07) {
+        rto->autoBestHtotalEnabled = false;
+        GBS::PLL648_CONTROL_01::write(0x55);
+        GBS::VDS_VSCALE_BYPS::write(0);
+        GBS::VDS_VSCALE::write(640);
+    }
 
     if (!uopt->wantOutputComponent) {
         GBS::PAD_SYNC_OUT_ENZ::write(0); // enable sync out if needed
@@ -4020,6 +4030,8 @@ void doPostPresetLoadSteps()
         SerialM.print(F("1280x720"));
     else if (rto->presetID == 0x05 || rto->presetID == 0x15)
         SerialM.print(F("1920x1080"));
+    else if (rto->presetID == 0x07)
+        SerialM.print(F("384p experimental"));
     else if (rto->presetID == 0x06 || rto->presetID == 0x16)
         SerialM.print(F("downscale"));
     else if (rto->presetID == 0x04)
@@ -4098,6 +4110,14 @@ void applyPresets(uint8_t result)
         }
     }
 
+    if (uopt->presetPreference == Output384P && result != 3 && result != 15) {
+        GBS::DAC_RGBS_PWDNZ::write(0);
+        GBS::PAD_SYNC_OUT_ENZ::write(1);
+        rto->applyPresetDoneStage = 0;
+        rto->autoBestHtotalEnabled = false;
+        SerialM.println(F("384p experiment requires 480p input"));
+        return;
+    }
     boolean waitExtra = 0;
     if (rto->outModeHdBypass || rto->videoStandardInput == 15 || rto->videoStandardInput == 0) {
         waitExtra = 1;
@@ -4277,6 +4297,8 @@ void applyPresets(uint8_t result)
             writeProgramArrayNew(ntsc_1920x1080, false);
         } else if (uopt->presetPreference == 6) {
             writeProgramArrayNew(ntsc_downscale, false);
+        } else if (uopt->presetPreference == Output384P) {
+            writeProgramArrayNew(ntsc_384p, false);
         }
     } else if (result == 2 || result == 4) {
         // PAL input
@@ -5026,6 +5048,13 @@ void updateClampPosition()
 // in this mode, sampling clock is free to choose
 void setOutModeHdBypass(bool regsInitialized)
 {
+    if (uopt->presetPreference == Output384P) {
+        GBS::DAC_RGBS_PWDNZ::write(0);
+        GBS::PAD_SYNC_OUT_ENZ::write(1);
+        rto->applyPresetDoneStage = 0;
+        rto->autoBestHtotalEnabled = false;
+        return;
+    }
     if (!rto->boardHasPower) {
         SerialM.println(F("GBS board not responding!"));
         return;
@@ -5331,6 +5360,7 @@ void bypassModeSwitch_RGBHV()
     GBS::DAC_RGBS_PWDNZ::write(0);   // disable DAC
     GBS::PAD_SYNC_OUT_ENZ::write(1); // disable sync out
 
+    if (uopt->presetPreference == Output384P) rto->applyPresetDoneStage = 0;
     loadHdBypassSection();
     externalClockGenResetClock();
     FrameSync::cleanup();
@@ -5445,8 +5475,8 @@ void bypassModeSwitch_RGBHV()
     togglePhaseAdjustUnits();
     delay(20);
     GBS::PLLAD_LEN::write(1);        // 5_11 1
-    GBS::DAC_RGBS_PWDNZ::write(1);   // enable DAC
-    GBS::PAD_SYNC_OUT_ENZ::write(0); // enable sync out
+    GBS::DAC_RGBS_PWDNZ::write(uopt->presetPreference == Output384P ? 0 : 1);   // enable DAC
+    GBS::PAD_SYNC_OUT_ENZ::write(uopt->presetPreference == Output384P ? 1 : 0); // enable sync out
 
     // todo: detect if H-PLL parameters fit the source before aligning clocks (5_11 etc)
 
@@ -6569,7 +6599,7 @@ void runSyncWatcher()
                     }
                     delay(300);
 
-                    if (rto->extClockGenDetected) {
+                    if (rto->extClockGenDetected && uopt->presetPreference != Output384P) {
                         // switch to ext clock
                         if (!rto->outModeHdBypass) {
                             if (GBS::PLL648_CONTROL_01::read() != 0x35 && GBS::PLL648_CONTROL_01::read() != 0x75) {
@@ -6682,7 +6712,7 @@ void runSyncWatcher()
                         }
                         delay(300);
 
-                        if (rto->extClockGenDetected) {
+                        if (rto->extClockGenDetected && uopt->presetPreference != Output384P) {
                             // switch to ext clock
                             if (!rto->outModeHdBypass) {
                                 if (GBS::PLL648_CONTROL_01::read() != 0x35 && GBS::PLL648_CONTROL_01::read() != 0x75) {
@@ -7683,6 +7713,9 @@ void updateWebSocketData()
                 case 0x15:
                     toSend[1] = '5';
                     break;
+                case 0x07:
+                    toSend[1] = '7';
+                    break;
                 case 0x06:
                 case 0x16:
                     toSend[1] = '6';
@@ -8561,7 +8594,7 @@ void loop()
                     break;
                 }
                 if (what.equals("f")) {
-                    if (rto->extClockGenDetected) {
+                    if (rto->extClockGenDetected && uopt->presetPreference != Output384P) {
                         Serial.print(F("old freqExtClockGen: "));
                         Serial.println((uint32_t)rto->freqExtClockGen);
                         rto->freqExtClockGen = Serial.parseInt();
@@ -8723,7 +8756,7 @@ void loop()
     }
 
     // run FrameTimeLock if enabled
-    if (uopt->enableFrameTimeLock && rto->sourceDisconnected == false && rto->autoBestHtotalEnabled &&
+    if (uopt->enableFrameTimeLock && uopt->presetPreference != Output384P && rto->sourceDisconnected == false && rto->autoBestHtotalEnabled &&
         rto->syncWatcherEnabled && FrameSync::ready() && millis() - lastVsyncLock > FrameSyncAttrs::lockInterval && rto->continousStableCounter > 20 && rto->noSyncCounter == 0)
     {
         uint16_t htotal = GBS::STATUS_SYNC_PROC_HTOTAL::read();
@@ -8859,7 +8892,7 @@ void loop()
                 GBS::SP_NO_CLAMP_REG::write(0); // 5_57 0
             }
 
-            if (rto->extClockGenDetected && rto->videoStandardInput != 14) {
+            if (rto->extClockGenDetected && rto->videoStandardInput != 14 && uopt->presetPreference != Output384P) {
                 // switch to ext clock
                 if (!rto->outModeHdBypass) {
                     if (GBS::PLL648_CONTROL_01::read() != 0x35 && GBS::PLL648_CONTROL_01::read() != 0x75) {
@@ -9118,7 +9151,8 @@ void handleType2Command(char argument)
         case 'h':
         case 'p':
         case 's':
-        case 'L': {
+        case 'L':
+        case 'J': {
             // load preset via webui
             uint8_t videoMode = getVideoMode();
             if (videoMode == 0 && GBS::STATUS_SYNC_PROC_HSACT::read())
@@ -9137,6 +9171,14 @@ void handleType2Command(char argument)
                 uopt->presetPreference = Output1080P; // 1920x1080
             if (argument == 'L')
                 uopt->presetPreference = OutputDownscale; // downscale
+            if (argument == 'J') {
+                uopt->presetPreference = Output384P;
+                uopt->preferScalingRgbhv = 1;
+                GBS::DAC_RGBS_PWDNZ::write(0);
+                GBS::PAD_SYNC_OUT_ENZ::write(1);
+                rto->applyPresetDoneStage = 0;
+                rto->autoBestHtotalEnabled = false;
+            }
 
             rto->useHdmiSyncFix = 1; // disables sync out when programming preset
             if (rto->videoStandardInput == 14) {
@@ -9598,7 +9640,7 @@ void startWebserver()
             //Serial.print("got serial request params: ");
             //Serial.println(params);
             if (params > 0) {
-                AsyncWebParameter *p = request->getParam(0);
+                const AsyncWebParameter *p = request->getParam(size_t(0));
                 //Serial.println(p->name());
                 serialCommand = p->name().charAt(0);
 
@@ -9617,7 +9659,7 @@ void startWebserver()
             //Serial.print("got user request params: ");
             //Serial.println(params);
             if (params > 0) {
-                AsyncWebParameter *p = request->getParam(0);
+                const AsyncWebParameter *p = request->getParam(size_t(0));
                 //Serial.println(p->name());
                 userCommand = p->name().charAt(0);
             }
@@ -9679,7 +9721,7 @@ void startWebserver()
             int params = request->params();
 
             if (params > 0) {
-                AsyncWebParameter *slotParam = request->getParam(0);
+                const AsyncWebParameter *slotParam = request->getParam(size_t(0));
                 String slotParamValue = slotParam->value();
                 char slotValue[2];
                 slotParamValue.toCharArray(slotValue, sizeof(slotValue));
@@ -9726,7 +9768,7 @@ void startWebserver()
                 }
 
                 // index param
-                AsyncWebParameter *slotIndexParam = request->getParam(0);
+                const AsyncWebParameter *slotIndexParam = request->getParam(size_t(0));
                 String slotIndexString = slotIndexParam->value();
                 uint8_t slotIndex = lowByte(slotIndexString.toInt());
                 if (slotIndex >= SLOTS_TOTAL) {
@@ -9734,7 +9776,7 @@ void startWebserver()
                 }
 
                 // name param
-                AsyncWebParameter *slotNameParam = request->getParam(1);
+                const AsyncWebParameter *slotNameParam = request->getParam(1);
                 String slotName = slotNameParam->value();
 
                 char emptySlotName[25] = "                        ";
@@ -9764,7 +9806,7 @@ void startWebserver()
     server.on("/slot/remove", HTTP_GET, [](AsyncWebServerRequest *request) {
         bool result = false;
         int params = request->params();
-        AsyncWebParameter *p = request->getParam(0);
+        const AsyncWebParameter *p = request->getParam(size_t(0));
         char param = p->name().charAt(0);
         if (params > 0)
         {
@@ -9859,7 +9901,7 @@ void startWebserver()
         if (ESP.getFreeHeap() > 10000) {
             int params = request->params();
             if (params > 0) {
-                request->send(SPIFFS, request->getParam(0)->value(), String(), true);
+                request->send(SPIFFS, request->getParam(size_t(0))->value(), String(), true);
             } else {
                 request->send(200, "application/json", "false");
             }
@@ -10786,6 +10828,8 @@ void settingsMenuOLED()
             display.drawString(0, 0, "1280x720");
         } else if (rto->presetID == 0x05 || rto->presetID == 0x15) {
             display.drawString(0, 0, "1920x1080");
+        } else if (rto->presetID == 0x07) {
+            display.drawString(0, 0, "384p EXP");
         } else if (rto->presetID == 0x06 || rto->presetID == 0x16) {
             display.drawString(0, 0, "Downscale");
         } else if (rto->presetID == 0x04) {

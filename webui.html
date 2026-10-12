@@ -855,6 +855,12 @@ section[name="alert"] {
               >
                 480p 576p
               </button>
+              <button class="gbs-button gbs-button__resolution"
+                gbs-message="J" gbs-message-type="user" gbs-click="normal"
+                gbs-element-ref="button24kHzScaleDown" gbs-role="preset"
+                title="Untested bench experiment; not MS9-ready.">
+                24 kHz / 384p (experimental)
+              </button>
               <button
                 gbs-message="L"
                 gbs-message-type="user"
@@ -2263,6 +2269,7 @@ const GBSControl = {
         4: "button720x480",
         5: "button1920x1080",
         6: "button15kHzScaleDown",
+        7: "button24kHzScaleDown",
         8: "buttonSourcePassThrough",
         9: "buttonLoadCustomPreset",
     },
@@ -2657,6 +2664,8 @@ const getSlotPresetName = (presetID) => {
         case 0x05:
         case 0x015:
             return "1920x1080";
+        case 0x07:
+            return "384p (24 kHz experimental)";
         case 0x06:
         case 0x016:
             return "DOWNSCALE";
