@@ -65,3 +65,5 @@ https://www.hard--candy.com/wp-content/uploads/2022/03/SegaTouringCarChampionshi
 The dedicated build environment uses ESP8266 platform 4.2.1 and maintained
 ESP32Async packages because the original web-server registry package is no
 longer available. Request parameter reads are const-correct for the newer API.
+
+Board-specific update/recovery evidence: [Project C Rev.1](project-c-rev1-recovery.md).
