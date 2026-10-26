@@ -93,3 +93,34 @@ or physical hardware. The 24.000 kHz timing is not MS9-ready, and scaling still
 uses the temporary 480 -> approximately 240 -> 384 pipeline. Nothing has been
 flashed by the assistant. The owner plans stock 240p testing with Lindbergh VT3;
 no result is recorded yet.
+
+## Fedora connectivity fix — 2026-10-26
+
+Observed on the owner's workstation: Wi-Fi authentication succeeded, but
+NetworkManager repeatedly rejected DHCP address 192.168.4.100 because another
+host was using it (address-conflict detection). The other device was not
+identified. Without a Wi-Fi IPv4 address, requests to the GBS AP went through
+the Ethernet default route and timed out.
+
+Applied only to the `gbscontrol` connection profile:
+
+```sh
+nmcli connection modify gbscontrol ipv4.method manual \
+  ipv4.addresses 192.168.4.200/24 ipv4.gateway '' \
+  ipv4.never-default yes ipv4.dns '' ipv6.method disabled
+nmcli connection up gbscontrol
+```
+
+Verified: activation succeeded; 192.168.4.1 routed over Wi-Fi with source
+192.168.4.200; HTTP GET returned 200; Ethernet remained the default route.
+No firmware or GBS video settings were changed. This is a workaround for the
+observed DHCP conflict, not a universal requirement. Choose an unused address
+on other networks; do not disable duplicate-address detection.
+
+To restore this profile's previous automatic settings:
+
+```sh
+nmcli connection modify gbscontrol ipv4.method auto ipv4.addresses '' \
+  ipv4.never-default no ipv6.method auto
+nmcli connection up gbscontrol
+```
