@@ -381,7 +381,19 @@ body {
 }
 
 .gbs-resolution {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.gbs-resolution__low-frequency {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.gbs-resolution__experimental {
+  font-size: 10px;
+  line-height: 12px;
 }
 
 .gbs-scroll > section[name="presets"] > fieldset.presets {
@@ -802,7 +814,8 @@ section[name="alert"] {
               </li>
               <li>Use the "Matched Presets" option to switch between the two automatically (Preferences tab)
               </li>
-              <li>Selecting a resolution also makes it the new startup preset.</li>
+              <li>Selecting a resolution also makes it the new startup preset and enables scaling for supported VGA inputs.</li>
+              <li>24 kHz / 384p is experimental and accepts 480p input. Display compatibility is still being tested; it is not yet MS9-ready.</li>
             </ul>
             <div class="gbs-resolution">
               <button
@@ -855,37 +868,53 @@ section[name="alert"] {
               >
                 480p 576p
               </button>
-              <button class="gbs-button gbs-button__resolution"
-                gbs-message="J" gbs-message-type="user" gbs-click="normal"
-                gbs-element-ref="button24kHzScaleDown" gbs-role="preset"
-                title="Untested bench experiment; not MS9-ready.">
-                24 kHz / 384p (experimental)
-              </button>
-              <button
-                gbs-message="L"
-                gbs-message-type="user"
-                gbs-click="normal"
-                class="gbs-button gbs-button__resolution gbs-button__resolution--center gbs-button__secondary"
-                gbs-element-ref="button15kHzScaleDown"
-                gbs-role="preset"
-              >
-                <div class="gbs-icon">tv</div>
-                <div>15KHz</div>
-              </button>
-              <button
-                gbs-message="K"
-                gbs-message-type="action"
-                gbs-click="normal"
-                class="gbs-button gbs-button__resolution gbs-button__resolution--center gbs-button__secondary"
-                gbs-element-ref="buttonSourcePassThrough"
-                gbs-role="preset"
-              >
-                <div class="gbs-icon">swap_calls</div>
-                <div class="gbs-button__resolution--pass-through">
-                  Pass Through
-                </div>
-              </button>
+              <div class="gbs-resolution__low-frequency">
+                <button class="gbs-button gbs-button__resolution gbs-button__resolution--center gbs-button__secondary"
+                  gbs-message="J" gbs-message-type="user" gbs-click="normal"
+                  gbs-element-ref="button24kHzScaleDown" gbs-role="preset"
+                  title="Experimental 384p; display compatibility still under test. Not MS9-ready.">
+                  <div>24 kHz</div>
+                  <div class="gbs-resolution__experimental">384p · experimental</div>
+                </button>
+                <button
+                  gbs-message="L"
+                  gbs-message-type="user"
+                  gbs-click="normal"
+                  class="gbs-button gbs-button__resolution gbs-button__resolution--center gbs-button__secondary"
+                  gbs-element-ref="button15kHzScaleDown"
+                  gbs-role="preset"
+                >
+                  <div class="gbs-icon">tv</div>
+                  <div>15 kHz</div>
+                </button>
+                <button
+                  gbs-message="K"
+                  gbs-message-type="action"
+                  gbs-click="normal"
+                  class="gbs-button gbs-button__resolution gbs-button__resolution--center gbs-button__secondary"
+                  gbs-element-ref="buttonSourcePassThrough"
+                  gbs-role="preset"
+                >
+                  <div class="gbs-icon">swap_calls</div>
+                  <div class="gbs-button__resolution--pass-through">
+                    Pass Through
+                  </div>
+                </button>
+              </div>
             </div>
+          </fieldset>
+          <fieldset class="gbs-fieldset">
+            <legend class="gbs-fieldset__legend">24 kHz profile</legend>
+            <label for="profile24k">Source and display</label>
+            <select id="profile24k" style="width:100%;padding:12px;margin:8px 0;color:inherit;background:#222">
+              <option value="0">480p · 4:3 · MS9 candidate (~59.69 Hz)</option>
+              <option value="1">OutRun 2 · 16:9 · MS9 candidate (~59.54 Hz)</option>
+              <option value="2">OutRun 2 · 16:9 · Toei LCD (~57.59 Hz)</option>
+              <option value="3">480p · 4:3 · Toei LCD (~52.20 Hz, cropped)</option>
+            </select>
+            <button id="apply24kProfile" class="gbs-button" type="button">Apply profile and select 24 kHz</button>
+            <p id="profile24kStatus" role="status" aria-live="polite">Loading saved profile…</p>
+            <p style="font-size:0.85em">Selection is remembered. Toei 4:3 uses ~52.20 Hz with about 9% total top/bottom cropping to preserve proportions. MS9 4:3 keeps ~59.69 Hz and needs CRT testing. Display-specific profiles use VGA input; OutRun profiles add letterboxing.</p>
           </fieldset>
           <fieldset class="gbs-fieldset presets">
             <legend class="gbs-fieldset__legend gbs-fieldset__legend--help">
@@ -1569,11 +1598,11 @@ section[name="alert"] {
               </tr>
               <tr>
                 <td>
-                  Low Res: Use Upscaling
+                  Low Res VGA: Use Scaling
                   <!-- prettier-ignore -->
                   <ul class="gbs-help">
-                    <li>Low Resolution VGA input: Pass-through or Upscale</li>
-                    <li>Low resolution sources can be either passed on directly or get upscaled.</li>
+                    <li>Low Resolution VGA input: Pass-through or Scale</li>
+                    <li>Low resolution sources can be passed through or scaled to the selected output preset. Selecting an output resolution enables this option.</li>
                     <li>Upscaling may have some border / scaling issues, but is more compatible with displays.</li>
                     <li>Also, refresh rates other than 60Hz are not well supported yet.</li>
                     <li>"Low resolution" is currently set at below or equal to 640x480 (525 active lines).</li>
@@ -3286,7 +3315,50 @@ const gbsPrompt = (text, defaultValue = "") => {
         GBSControl.ui.promptInput.focus();
     });
 };
+const init24kProfiles = () => {
+    const select = document.getElementById("profile24k");
+    const button = document.getElementById("apply24kProfile");
+    const status = document.getElementById("profile24kStatus");
+    let editing = false, applying = false;
+    select.addEventListener("change", () => { editing = true; status.textContent = "Not applied yet."; });
+    const refresh = async () => {
+        try {
+            const response = await fetch("/profiles/24k", {cache: "no-store"});
+            if (!response.ok) throw new Error("Profile status unavailable");
+            const state = await response.json();
+            if (!editing) select.value = String(state.selected);
+            if (!editing && !applying) status.textContent = !state.saved ? "Could not save selection; retry Apply." :
+                state.pending ? "Applying…" : state.active ? "Saved profile active · 24 kHz" :
+                state.component && state.selected !== 0 ? "This profile requires RGB output." :
+                "Saved profile: " + select.options[state.selected].text + ". Select 24 kHz with a supported source to activate.";
+            return state;
+        } catch (error) { if (!editing && !applying) status.textContent = error.message + ". Retrying…"; }
+    };
+    button.addEventListener("click", async () => {
+        const wanted = Number(select.value);
+        button.disabled = true; select.disabled = true; applying = true;
+        status.textContent = "Applying and saving…";
+        try {
+            const response = await fetch("/profiles/24k", {method: "POST", body: new URLSearchParams({profile: String(wanted)})});
+            if (!response.ok) throw new Error(await response.text());
+            editing = false;
+            let state;
+            for (let i = 0; i < 20; i++) {
+                await new Promise(resolve => setTimeout(resolve, 500));
+                state = await refresh();
+                if (state && !state.pending && state.selected === wanted && state.active) break;
+            }
+            if (!state || state.selected !== wanted || state.pending) throw new Error("Could not confirm selection; check connection and retry.");
+            if (!state.saved) throw new Error("Profile selected, but saving failed. Retry Apply.");
+            status.textContent = state.active ? "Saved profile active · 24 kHz" : "Profile saved; waiting for supported input/RGB output.";
+        } catch (error) { status.textContent = error.message; }
+        finally { applying = false; button.disabled = false; select.disabled = false; }
+    });
+    refresh();
+    setInterval(() => { if (!applying) refresh(); }, 3000);
+};
 const initUI = () => {
+    init24kProfiles();
     updateCustomSlotFilters();
     initGeneralListeners();
     updateViewPort();

@@ -19,6 +19,7 @@ struct userOptions
     // 0 - normal, 1 - x480/x576, 2 - customized, 3 - 1280x720, 4 - 1280x1024, 5 - 1920x1080,
     // 6 - downscale, 10 - bypass
     PresetPreference presetPreference;
+    uint8_t profile24k; // 0: 4:3 MS9 candidate, 1: OutRun MS9, 2: OutRun Toei, 3: 4:3 Toei
     Ascii8 presetSlot;
     uint8_t enableFrameTimeLock;
     uint8_t frameTimeLockMethod;

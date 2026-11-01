@@ -330,6 +330,15 @@ public:
     typedef UReg<0x02, 0x24, 2, 1> MADPT_PD_RAM_BYPS;
     typedef UReg<0x02, 0x26, 6, 1> MADPT_VIIR_BYPS;
     typedef UReg<0x02, 0x27, 0, 7> MADPT_VIIR_COEF;
+    typedef UReg<0x02, 0x28, 4, 4> MADPT_VSCALE_RATE_LOW;
+    typedef UReg<0x02, 0x29, 0, 8> MADPT_VSCALE_RATE_SEG0;
+    typedef UReg<0x02, 0x2a, 0, 8> MADPT_VSCALE_RATE_SEG1;
+    typedef UReg<0x02, 0x2b, 0, 8> MADPT_VSCALE_RATE_SEG2;
+    typedef UReg<0x02, 0x2c, 0, 8> MADPT_VSCALE_RATE_SEG3;
+    typedef UReg<0x02, 0x2d, 0, 8> MADPT_VSCALE_RATE_SEG4;
+    typedef UReg<0x02, 0x2e, 0, 8> MADPT_VSCALE_RATE_SEG5;
+    typedef UReg<0x02, 0x2f, 0, 8> MADPT_VSCALE_RATE_SEG6;
+    typedef UReg<0x02, 0x30, 0, 8> MADPT_VSCALE_RATE_SEG7;
     typedef UReg<0x02, 0x31, 0, 2> MADPT_VSCALE_DEC_FACTOR;
     typedef UReg<0x02, 0x31, 2, 1> MADPT_SEL_PHASE_INI;
     typedef UReg<0x02, 0x35, 3, 1> MADPT_DD0_SEL;

@@ -27,3 +27,11 @@ https://www.youtube.com/watch?v=fmfR0XI5czI
 Development threads:  
 https://shmups.system11.org/viewtopic.php?f=6&t=52172   
 https://circuit-board.de/forum/index.php/Thread/15601-GBS-8220-Custom-Firmware-in-Arbeit/   
+
+
+## This fork's experimental24kHz work
+
+See [firmware/build notes](docs/384p-experiment.md) and
+[display profiles](docs/24khz-app-profiles.md). Private hardware tooling and
+notebook workflows are maintained separately in
+[gbs-bench](https://github.com/lapastillaroja/gbs-bench).

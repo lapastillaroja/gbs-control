@@ -112,6 +112,7 @@ Pinger pinger; // pinger global object to aid debugging WiFi issues
 #endif
 
 typedef TV5725<GBS_ADDR> GBS;
+#include "profiles_24khz.h"
 
 static unsigned long lastVsyncLock = millis();
 
@@ -219,6 +220,10 @@ struct adcOptions *adco = &adcopts;
 String slotIndexMap = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~()!*:,";
 
 char serialCommand;               // Serial / Web Server commands
+volatile uint8_t requested24kProfile = 255;
+bool profile24kDirty = false;
+uint8_t applied24kProfile = 255;
+bool profile24kSaved = true;
 char userCommand;               // Serial / Web Server commands
 static uint8_t lastSegment = 0xFF; // GBS segment for direct access
 //uint8_t globalDelay; // used for dev / debug
@@ -3227,6 +3232,20 @@ uint32_t getPllRate()
 
 #define AUTO_GAIN_INIT 0x48
 
+// TVIA guide section6.4: equal 12-bit segment rates give linear vertical scaling.
+void setVerticalDownscaleRate(uint16_t rate)
+{
+    GBS::MADPT_VSCALE_RATE_LOW::write(rate & 15);
+    GBS::MADPT_VSCALE_RATE_SEG0::write(rate >> 4);
+    GBS::MADPT_VSCALE_RATE_SEG1::write(rate >> 4);
+    GBS::MADPT_VSCALE_RATE_SEG2::write(rate >> 4);
+    GBS::MADPT_VSCALE_RATE_SEG3::write(rate >> 4);
+    GBS::MADPT_VSCALE_RATE_SEG4::write(rate >> 4);
+    GBS::MADPT_VSCALE_RATE_SEG5::write(rate >> 4);
+    GBS::MADPT_VSCALE_RATE_SEG6::write(rate >> 4);
+    GBS::MADPT_VSCALE_RATE_SEG7::write(rate >> 4);
+}
+
 void doPostPresetLoadSteps()
 {
     //unsigned long postLoadTimer = millis();
@@ -3899,10 +3918,25 @@ void doPostPresetLoadSteps()
     GBS::SP_CS_CLP_ST::write(32);
     GBS::SP_CS_CLP_SP::write(48); // same as reset parameters
     if (rto->presetID == 0x07) {
+        profile24kDirty = true;
+        applied24kProfile = 255;
         rto->autoBestHtotalEnabled = false;
         GBS::PLL648_CONTROL_01::write(0x55);
-        GBS::VDS_VSCALE_BYPS::write(0);
-        GBS::VDS_VSCALE::write(640);
+        // Direct 480-to-384 scaling; avoid throwing away half the source lines.
+        GBS::MADPT_Y_VSCALE_BYPS::write(0);
+        GBS::MADPT_UV_VSCALE_BYPS::write(0);
+        GBS::MADPT_PD_RAM_BYPS::write(0);
+        GBS::MADPT_VSCALE_DEC_FACTOR::write(0);
+        setVerticalDownscaleRate(1024);
+        GBS::MADPT_SEL_PHASE_INI::write(1);
+        GBS::MADPT_SEL_PHASE_INI::write(0);
+        GBS::VDS_VSCALE_BYPS::write(1);
+        GBS::VDS_VSCALE::write(1023);
+        if (GBS::GBS_OPTION_SCALING_RGBHV::read()) {
+            // Bench: inherited downscale IF blanking causes a wide green left band.
+            GBS::IF_HB_ST::write(30);
+            GBS::IF_HB_SP::write(0);
+        }
     }
 
     if (!uopt->wantOutputComponent) {
@@ -5360,7 +5394,11 @@ void bypassModeSwitch_RGBHV()
     GBS::DAC_RGBS_PWDNZ::write(0);   // disable DAC
     GBS::PAD_SYNC_OUT_ENZ::write(1); // disable sync out
 
-    if (uopt->presetPreference == Output384P) rto->applyPresetDoneStage = 0;
+    // RGBHV bypass must not retain scaler/HD-bypass transition state.
+    rto->applyPresetDoneStage = 0;
+    rto->outModeHdBypass = false;
+    rto->isValidForScalingRGBHV = false;
+    GBS::GBS_OPTION_SCALING_RGBHV::write(0);
     loadHdBypassSection();
     externalClockGenResetClock();
     FrameSync::cleanup();
@@ -7141,6 +7179,7 @@ void calibrateAdcOffset()
 
 void loadDefaultUserOptions()
 {
+    uopt->profile24k = 0;
     uopt->presetPreference = Output960P;    // #1
     uopt->enableFrameTimeLock = 0; // permanently adjust frame timing to avoid glitch vertical bar. does not work on all displays!
     uopt->presetSlot = 'A';          //
@@ -7473,6 +7512,9 @@ void setup()
             if (uopt->disableExternalClockGenerator > 1)
                 uopt->disableExternalClockGenerator = 0;
 
+            // Appended byte: existing 19-byte preferences default to standard 4:3.
+            int profile = f.read();
+            uopt->profile24k = profile >= '0' && profile <= '3' ? profile - '0' : 0;
             f.close();
         }
     }
@@ -7828,8 +7870,44 @@ void myLog(char const* type, char command) {
         type, command, uopt->presetPreference, uopt->presetSlot, rto->presetID);
 }
 
+#ifdef GBS_BENCH
+#include "gbs_bench.h"
+#include "gbs_bench_registers.h"
+#endif
+
+void process24kProfile()
+{
+    if (uopt->presetPreference != Output384P || rto->sourceDisconnected ||
+        (rto->videoStandardInput != 3 && rto->videoStandardInput != 14)) {
+        applied24kProfile = 255;
+        return;
+    }
+    if (!profile24kDirty || rto->presetID != 7 || rto->continousStableCounter < 2) return;
+    // Display-specific capture settings have only been exercised on RGBHV.
+    if (uopt->profile24k != 0 &&
+        (rto->videoStandardInput != 14 || uopt->wantOutputComponent)) return;
+    if (uopt->profile24k != 0 || (rto->videoStandardInput == 14 && !uopt->wantOutputComponent)) {
+        GBS::DAC_RGBS_PWDNZ::write(0);
+        if (uopt->profile24k == 0) writeStandardRgbhv24kProfile();
+        else if (uopt->profile24k == 3) writeToei43Profile();
+        else writeOutrun24kProfile(uopt->profile24k == 2);
+        GBS::MADPT_SEL_PHASE_INI::write(1);
+        GBS::MADPT_SEL_PHASE_INI::write(0);
+        latchPLLAD();
+        ResetSDRAM();
+        GBS::DAC_RGBS_PWDNZ::write(1);
+    }
+    applied24kProfile = uopt->profile24k;
+    profile24kDirty = false;
+    SerialM.printf("24k profile %u applied\n", applied24kProfile);
+}
+
 void loop()
 {
+#ifdef GBS_BENCH
+    applyBenchRegisterJob();
+    applyBenchAdjustment();
+#endif
     static uint8_t readout = 0;
     static uint8_t segmentCurrent = 255;
     static uint8_t registerCurrent = 255;
@@ -7885,7 +7963,7 @@ void loop()
                 serialCommand = ' ';
             }
         }
-        myLog("serial", serialCommand);
+        if (serialCommand != '?') myLog("serial", serialCommand);
 
         switch (serialCommand) {
             case ' ':
@@ -8030,8 +8108,18 @@ void loop()
                 bypassModeSwitch_RGBHV();
                 break;
             case 'K':
-                setOutModeHdBypass(false);
+                // Explicit passthrough overrides automatic VGA scaling, just as an
+                // explicit output resolution enables it in handleType2Command().
                 uopt->presetPreference = OutputBypass;
+                uopt->preferScalingRgbhv = false;
+                rto->applyPresetDoneStage = 0;
+                if (rto->videoStandardInput == 14 || rto->videoStandardInput == 15) {
+                    // Separate H/V sources need the dedicated RGBHV/ADC path.
+                    // The generic HD path assumes processed sync and can lose output.
+                    applyPresets(15);
+                } else {
+                    setOutModeHdBypass(false);
+                }
                 saveUserPrefs();
                 break;
             case 'T':
@@ -8210,6 +8298,68 @@ void loop()
                     SerialM.println("on");
                 }
                 break;
+            case '?': {
+                // One frame avoids the many tiny WebSocket writes of the legacy dump.
+                // These debug taps describe the scaler, not the bypass output.
+                // -1 explicitly means unavailable; do not report an idle VDS clock.
+                bool vdsTiming = GBS::OUT_SYNC_SEL::read() == 0;
+                float inputHz = vdsTiming ? getSourceFieldRate(1) : -1.0f;
+                float outputHz = vdsTiming ? getOutputFrameRate() : -1.0f;
+                char report[1280];
+                snprintf(report, sizeof(report),
+                    "BENCH O pref=%u preset=%u mode=%u sync=%u scaling=%u component=%u "
+                    "clock=0x%02x ht=%u vt=%u hs=%u/%u vs=%u/%u "
+                    "hblank=%u/%u vblank=%u/%u hscale=%u vscale=%u vbypass=%u "
+                    "dec=%u half=%u fetch=%u offset=%u inputVT=%u inHz=%.4f outHz=%.4f heap=%u route=%u outen=%u ifvs=%u/%u mad=%u/%u rate=%u timingflags=%u/%u/%u/%u pblank=%u/%u,%u/%u dram=%u ib=%u/%u,%u/%u,%u/%u dac=%u syncen=%u adc2dac=%u hdbypass=%u rgbhvflag=%u adcphase=%u spphase=%u adcfilter=%u pllmd=%u pllks=%u pllicp=%u pllfs=%u pllckos=%u osr=%u hpll=%u syncloop=%u ifhrst=%u ifline=%u/%u ifhbin=%u/%u ifdec=%u ifld=%u/%u/%u exthb=%u/%u frozen=%u\n",
+                    (unsigned)uopt->presetPreference, (unsigned)rto->presetID,
+                    (unsigned)rto->videoStandardInput, (unsigned)rto->syncTypeCsync,
+                    (unsigned)uopt->preferScalingRgbhv, (unsigned)uopt->wantOutputComponent,
+                    (unsigned)GBS::PLL648_CONTROL_01::read(),
+                    (unsigned)GBS::VDS_HSYNC_RST::read(), (unsigned)GBS::VDS_VSYNC_RST::read(),
+                    (unsigned)GBS::VDS_HS_ST::read(), (unsigned)GBS::VDS_HS_SP::read(),
+                    (unsigned)GBS::VDS_VS_ST::read(), (unsigned)GBS::VDS_VS_SP::read(),
+                    (unsigned)GBS::VDS_DIS_HB_ST::read(), (unsigned)GBS::VDS_DIS_HB_SP::read(),
+                    (unsigned)GBS::VDS_DIS_VB_ST::read(), (unsigned)GBS::VDS_DIS_VB_SP::read(),
+                    (unsigned)GBS::VDS_HSCALE::read(), (unsigned)GBS::VDS_VSCALE::read(),
+                    (unsigned)GBS::VDS_VSCALE_BYPS::read(), (unsigned)GBS::MADPT_VSCALE_DEC_FACTOR::read(),
+                    (unsigned)GBS::VDS_HALF_EN::read(), (unsigned)GBS::PB_FETCH_NUM::read(),
+                    (unsigned)GBS::PB_CAP_OFFSET::read(), (unsigned)GBS::STATUS_SYNC_PROC_VTOTAL::read(),
+                    inputHz, outputHz, ESP.getFreeHeap(), (unsigned)GBS::OUT_SYNC_SEL::read(),
+                    (unsigned)GBS::OUT_SYNC_CNTRL::read(), (unsigned)GBS::IF_VS_SEL::read(),
+                    (unsigned)GBS::IF_VS_FLIP::read(), (unsigned)GBS::MADPT_Y_VSCALE_BYPS::read(),
+                    (unsigned)GBS::MADPT_UV_VSCALE_BYPS::read(),
+                    (unsigned)(GBS::MADPT_VSCALE_RATE_SEG0::read()*16 + GBS::MADPT_VSCALE_RATE_LOW::read()),
+                    (unsigned)GBS::VDS_SYNC_EN::read(), (unsigned)GBS::VDS_FLOCK_EN::read(),
+                    (unsigned)GBS::VDS_DIF_FR_SEL_EN::read(), (unsigned)GBS::VDS_DFIELD_EN::read(),
+                    (unsigned)GBS::VDS_HB_ST::read(), (unsigned)GBS::VDS_HB_SP::read(),
+                    (unsigned)GBS::VDS_VB_ST::read(), (unsigned)GBS::VDS_VB_SP::read(),
+                    (unsigned)GBS::VDS_D_RAM_BYPS::read(),
+                    (unsigned)GBS::IF_HB_ST::read(), (unsigned)GBS::IF_HB_SP::read(),
+                    (unsigned)GBS::IF_HB_ST2::read(), (unsigned)GBS::IF_HB_SP2::read(),
+                    (unsigned)GBS::IF_VB_ST::read(), (unsigned)GBS::IF_VB_SP::read(),
+                    (unsigned)GBS::DAC_RGBS_PWDNZ::read(), (unsigned)!GBS::PAD_SYNC_OUT_ENZ::read(),
+                    (unsigned)GBS::DAC_RGBS_ADC2DAC::read(), (unsigned)rto->outModeHdBypass,
+                    (unsigned)GBS::GBS_OPTION_SCALING_RGBHV::read(),
+                    (unsigned)GBS::PA_ADC_S::read(), (unsigned)GBS::PA_SP_S::read(),
+                    (unsigned)GBS::ADC_FLTR::read(), (unsigned)GBS::PLLAD_MD::read(),
+                    (unsigned)GBS::PLLAD_KS::read(), (unsigned)GBS::PLLAD_ICP::read(),
+                    (unsigned)GBS::PLLAD_FS::read(), (unsigned)GBS::PLLAD_CKOS::read(),
+                    (unsigned)rto->osr, (unsigned)rto->HPLLState,
+                    (unsigned)GBS::SP_HS_LOOP_SEL::read(),
+                    (unsigned)GBS::IF_HSYNC_RST::read(),
+                    (unsigned)GBS::IF_LINE_ST::read(), (unsigned)GBS::IF_LINE_SP::read(),
+                    (unsigned)GBS::IF_HBIN_ST::read(), (unsigned)GBS::IF_HBIN_SP::read(),
+                    (unsigned)GBS::IF_HS_DEC_FACTOR::read(),
+                    (unsigned)GBS::IF_LD_RAM_BYPS::read(), (unsigned)GBS::IF_LD_SEL_PROV::read(),
+                    (unsigned)GBS::IF_LD_WRST_SEL::read(),
+                    (unsigned)GBS::VDS_EXT_HB_ST::read(), (unsigned)GBS::VDS_EXT_HB_SP::read(),
+                    (unsigned)!GBS::CAPTURE_ENABLE::read());
+                Serial.write(report);
+#if ENABLE_WIFI
+                if (ESP.getFreeHeap() > 10000) webSocket.broadcastTXT(report);
+#endif
+                break;
+            }
             case ',':
                 printVideoTimings();
                 break;
@@ -8748,6 +8898,17 @@ void loop()
         }
     }
 
+    if (requested24kProfile != 255 && userCommand == '@') {
+        uopt->profile24k = requested24kProfile;
+        requested24kProfile = 255;
+        applied24kProfile = 255;
+        handleType2Command('J'); // selects 24k and persists all preferences
+#if ENABLE_WIFI
+        File saved = SPIFFS.open("/preferencesv2.txt", "r");
+        profile24kSaved = saved && saved.seek(19, SeekSet) && saved.read() == uopt->profile24k + '0';
+        if (saved) saved.close();
+#endif
+    }
     if (userCommand != '@') {
         handleType2Command(userCommand);
         userCommand = '@'; // in case we handled web server command
@@ -8988,6 +9149,8 @@ void loop()
         }
     }
 
+    process24kProfile(); // after sync watcher and post-preset capture adjustments
+
 #ifdef HAVE_PINGER_LIBRARY
     // periodic pings for debugging WiFi issues
     if (WiFi.status() == WL_CONNECTED) {
@@ -9153,7 +9316,9 @@ void handleType2Command(char argument)
         case 's':
         case 'L':
         case 'J': {
-            // load preset via webui
+            // Explicit resolution selection overrides the low-resolution VGA bypass preference.
+            // Do this in the shared handler so UI and API requests behave identically.
+            uopt->preferScalingRgbhv = 1;
             uint8_t videoMode = getVideoMode();
             if (videoMode == 0 && GBS::STATUS_SYNC_PROC_HSACT::read())
                 videoMode = rto->videoStandardInput; // last known good as fallback
@@ -9173,7 +9338,6 @@ void handleType2Command(char argument)
                 uopt->presetPreference = OutputDownscale; // downscale
             if (argument == 'J') {
                 uopt->presetPreference = Output384P;
-                uopt->preferScalingRgbhv = 1;
                 GBS::DAC_RGBS_PWDNZ::write(0);
                 GBS::PAD_SYNC_OUT_ENZ::write(1);
                 rto->applyPresetDoneStage = 0;
@@ -9632,6 +9796,56 @@ void startWebserver()
             response->addHeader("Content-Encoding", "gzip");
             request->send(response);
         }
+    });
+
+#ifdef GBS_BENCH
+    registerBenchRegisterEndpoints();
+    server.on("/bench/set", HTTP_GET, [](AsyncWebServerRequest *request) {
+        if (!request->hasParam("field") || !request->hasParam("value")) {
+            request->send(400, "text/plain", "field and value required"); return;
+        }
+        String field = request->getParam("field")->value();
+        String text = request->getParam("value")->value();
+        if (!text.length() || text.length() > 4) { request->send(400); return; }
+        for (size_t n = 0; n < text.length(); n++)
+            if (text[n] < '0' || text[n] > '9') { request->send(400); return; }
+        uint16_t value = text.toInt();
+        if (benchPending || benchJob) { request->send(409); return; }
+        if (uopt->presetPreference != Output384P || rto->presetID != 7) { request->send(409); return; }
+        for (uint8_t i = 0; i < sizeof(benchFields)/sizeof(benchFields[0]); i++) {
+            if (field == benchFields[i].name) {
+                if (value < benchFields[i].minimum || value > benchFields[i].maximum) { request->send(400); return; }
+                benchValue = value;
+                benchPending = i + 1;
+                request->send(202, "text/plain", "queued"); return;
+            }
+        }
+        request->send(400, "text/plain", "unknown field");
+    });
+#endif
+
+    server.on("/profiles/24k", HTTP_GET, [](AsyncWebServerRequest *request) {
+        char json[220];
+        bool active = uopt->presetPreference == Output384P && rto->presetID == 7 &&
+                      !rto->sourceDisconnected && applied24kProfile == uopt->profile24k;
+        snprintf(json, sizeof(json),
+            "{\"selected\":%u,\"active\":%s,\"pending\":%s,\"saved\":%s,\"mode\":%u,\"component\":%s}",
+            uopt->profile24k, active ? "true" : "false",
+            requested24kProfile != 255 ? "true" : "false", profile24kSaved ? "true" : "false",
+            rto->videoStandardInput, uopt->wantOutputComponent ? "true" : "false");
+        AsyncWebServerResponse *response = request->beginResponse(200, "application/json", json);
+        response->addHeader("Cache-Control", "no-store");
+        request->send(response);
+    });
+    server.on("/profiles/24k", HTTP_POST, [](AsyncWebServerRequest *request) {
+        if (!request->hasParam("profile", true)) { request->send(400, "text/plain", "profile required"); return; }
+        String value = request->getParam("profile", true)->value();
+        if (value.length() != 1 || value[0] < '0' || value[0] > '3') {
+            request->send(400, "text/plain", "profile must be 0, 1, 2 or 3"); return;
+        }
+        if (requested24kProfile != 255) { request->send(409, "text/plain", "profile request pending"); return; }
+        requested24kProfile = value[0] - '0';
+        request->send(202, "application/json", "{\"queued\":true}");
     });
 
     server.on("/sc", HTTP_GET, [](AsyncWebServerRequest *request) {
@@ -10290,6 +10504,7 @@ void saveUserPrefs()
     f.write(uopt->enableCalibrationADC + '0');          // #17
     f.write(uopt->scanlineStrength + '0');              // #18
     f.write(uopt->disableExternalClockGenerator + '0'); // #19
+    f.write(uopt->profile24k + '0'); // #20; backward-compatible appended preference
 
 
     f.close();

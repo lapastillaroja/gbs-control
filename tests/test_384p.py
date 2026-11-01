@@ -24,13 +24,21 @@ class TimingTests(unittest.TestCase):
         self.assertEqual(field(self.regs, 'PLL648_CONTROL_01'), 0x55)
         h = field(self.regs, 'VDS_HSYNC_RST')
         v = field(self.regs, 'VDS_VSYNC_RST')
-        self.assertEqual(64800000 / h, 24000)
-        self.assertEqual(64800000 / h / v, 60)
+        self.assertAlmostEqual(64800000 / (h + 1), 24536.1605, places=3)
+        self.assertAlmostEqual(64800000 / (h + 1) / (v + 1), 59.6987, places=3)
     def test_active_lines_and_scaling(self):
         self.assertEqual(field(self.regs, 'VDS_DIS_VB_ST') - field(self.regs, 'VDS_DIS_VB_SP'), 384)
-        self.assertEqual(field(self.regs, 'VDS_VSCALE_BYPS'), 0)
-        self.assertEqual(240 * 1024 / field(self.regs, 'VDS_VSCALE'), 384)
+        self.assertEqual(field(self.regs, 'VDS_VSCALE_BYPS'), 1)
+        for axis in ['H', 'V']:
+            for edge in ['ST', 'SP']:
+                self.assertEqual(field(self.regs, f'VDS_EXT_{axis}B_{edge}'),
+                                 field(self.regs, f'VDS_DIS_{axis}B_{edge}'))
         self.assertEqual(field(self.regs, 'GBS_PRESET_ID'), 7)
+    def test_free_running_output(self):
+        for name in ['VDS_SYNC_EN', 'VDS_FLOCK_EN', 'VDS_DIF_FR_SEL_EN', 'VDS_DFIELD_EN']:
+            self.assertEqual(field(self.regs, name), 0, name)
+        self.assertLess(field(self.regs, 'VDS_VB_SP'), field(self.regs, 'VDS_DIS_VB_SP'))
+
     def test_negative_sync_and_bounds(self):
         for axis, bits in [('H', 12), ('V', 11)]:
             total = field(self.regs, f'VDS_{axis}SYNC_RST')
@@ -41,7 +49,7 @@ class TimingTests(unittest.TestCase):
             self.assertLess(total, 2**bits)
             for suffix in ['B_ST', 'B_SP', 'S_ST', 'S_SP']:
                 self.assertLess(field(self.regs, f'VDS_{axis}{suffix}'), total)
-    def test_capture_pipeline_unchanged(self):
+    def test_unrelated_preset_registers_unchanged(self):
         original = registers('ntsc_downscale.h')
         self.assertEqual(set(original), set(self.regs))
         for key, value in original.items():
