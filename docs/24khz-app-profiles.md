@@ -9,7 +9,7 @@ alone do not apply. These are manual profiles, not automatic source/display dete
 |0|480p4:3 MS9 candidate|384 active lines, about59.69Hz|VT3 capture tested; MS9 unverified|
 |1|OutRun16:9 MS9 candidate|288 content lines, about59.54Hz|MS9 unverified|
 |2|OutRun16:9 Toei LCD|348 content lines, about57.59Hz|Lindbergh/Toei geometry tested|
-|3|480p4:3 Toei LCD|About450 scaled lines cropped to408 visible lines, about52.20Hz|VT3/Toei compromise; about9% total vertical crop|
+|3|480p4:3 Toei LCD|About400 scaled lines within408 visible lines, about52.20Hz|VT3 full picture and clean right edge confirmed on Toei|
 
 Toei compensation is display-specific. It must not be used as evidence of MS9
 geometry or signal compatibility. Full-screen4:3 Toei geometry at59.xxHz has
@@ -27,7 +27,7 @@ retain the base preset. Reloading the base preset clears previous overrides.
 `profiles_24khz.h` is generated from `bench-configs/` by
 `python3 tools/generate_24khz_profiles.py`. After UI edits, run
 `python3 tools/generate_webui.py`. Tests cover generation, register packing,
-capture geometry, cropped-versus-scaled height, and UI request handling.
+capture geometry, full-frame scaling and proportional width, and UI request handling.
 
 ## API
 

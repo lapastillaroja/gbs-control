@@ -31,16 +31,25 @@ class ProfilesTests(unittest.TestCase):
                 self.assertLessEqual(visible_clocks * f['VDS_HSCALE'],
                                      f['PB_FETCH_NUM'] * 4 * 1024)
 
-    def test_toei_43_crops_instead_of_squashing_source(self):
+    def test_toei_43_fits_complete_source_with_proportional_width(self):
         config=json.loads((ROOT/'bench-configs/vt3-toei-52hz-candidate.json').read_text())
         module('gbs_config').encode_config(config)
         f=config['fields']
         rate=f['MADPT_VSCALE_RATE_SEG0']*16+f['MADPT_VSCALE_RATE_LOW']
         source_height=480*4096/(4096+rate)
         visible_height=f['VDS_DIS_VB_ST']-f['VDS_DIS_VB_SP']
-        self.assertAlmostEqual(source_height,450,delta=0.1)
+        self.assertAlmostEqual(source_height,400,delta=0.1)
         self.assertEqual(visible_height,408)
-        self.assertGreater(source_height,visible_height)
+        self.assertLess(source_height,visible_height)
+        # Equal fractional rates preserve linear scaling throughout the frame.
+        for i in range(8):
+            self.assertEqual(f[f'MADPT_VSCALE_RATE_SEG{i}']*16+f['MADPT_VSCALE_RATE_LOW'],rate)
+        # Reduce width with height relative to the previous 450-line geometry.
+        self.assertAlmostEqual(688 / f['VDS_HSCALE'], source_height / 450, delta=0.002)
+        self.assertLessEqual((f['VDS_DIS_HB_ST']-f['VDS_DIS_HB_SP'])*f['VDS_HSCALE'],
+                             f['PB_FETCH_NUM']*4*1024)
+        self.assertEqual(f['VDS_EXT_HB_ST'],f['VDS_DIS_HB_ST'])
+        self.assertEqual(f['VDS_EXT_HB_SP'],f['VDS_DIS_HB_SP'])
         self.assertAlmostEqual(40500000/(f['VDS_HSYNC_RST']+1)/(f['VDS_VSYNC_RST']+1),52.2,delta=0.02)
         self.assertLess(f['VDS_DIS_VB_ST'],f['VDS_VSYNC_RST']+1)
         self.assertEqual(f['VDS_EXT_VB_ST'],f['VDS_DIS_VB_ST'])

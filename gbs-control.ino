@@ -8307,7 +8307,7 @@ void loop()
                 float outputHz = vdsTiming ? getOutputFrameRate() : -1.0f;
                 char report[1280];
                 snprintf(report, sizeof(report),
-                    "BENCH O pref=%u preset=%u mode=%u sync=%u scaling=%u component=%u "
+                    "BENCH P pref=%u preset=%u mode=%u sync=%u scaling=%u component=%u "
                     "clock=0x%02x ht=%u vt=%u hs=%u/%u vs=%u/%u "
                     "hblank=%u/%u vblank=%u/%u hscale=%u vscale=%u vbypass=%u "
                     "dec=%u half=%u fetch=%u offset=%u inputVT=%u inHz=%.4f outHz=%.4f heap=%u route=%u outen=%u ifvs=%u/%u mad=%u/%u rate=%u timingflags=%u/%u/%u/%u pblank=%u/%u,%u/%u dram=%u ib=%u/%u,%u/%u,%u/%u dac=%u syncen=%u adc2dac=%u hdbypass=%u rgbhvflag=%u adcphase=%u spphase=%u adcfilter=%u pllmd=%u pllks=%u pllicp=%u pllfs=%u pllckos=%u osr=%u hpll=%u syncloop=%u ifhrst=%u ifline=%u/%u ifhbin=%u/%u ifdec=%u ifld=%u/%u/%u exthb=%u/%u frozen=%u\n",

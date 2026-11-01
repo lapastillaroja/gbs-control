@@ -7,7 +7,7 @@ normal and diagnostic builds are reproducible. See
 - `standard-rgbhv-384p-candidate.json`:4:3 MS9 candidate, about59.69Hz.
 - `outrun-ms9-384p-candidate.json`:16:9 MS9 candidate, about59.54Hz.
 - `outrun-toei-426-candidate.json`:16:9 Toei, about57.59Hz.
-- `vt3-toei-52hz-candidate.json`:4:3 Toei, about52.20Hz, cropped.
+- `vt3-toei-52hz-candidate.json`:4:3 Toei, about52.20Hz, full-picture scaling with proportional width reduction.
 
 MS9 profiles remain unqualified on actual CRT hardware.
 
